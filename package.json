@@ -1,1 +1,13 @@
-
+{
+  "expo": {
+    "name": "Cut Logger",
+    "slug": "cut-logger",
+    "scheme": "cutlogger",
+    "platforms": ["ios", "android", "web"],
+    "web": {
+      "bundler": "metro",
+      "display": "standalone",
+      "themeColor": "#0B0F14"
+    }
+  }
+}
