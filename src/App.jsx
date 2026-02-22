@@ -1,69 +1,15 @@
-// app/App.js
-// Expo (iOS/Android/Web). PWA-ready via expo web export.
-// Needs: react-navigation + async-storage + gesture handler
+import React, { useMemo, useState } from "react";
 
-import "react-native-gesture-handler";
-
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import {
-  View,
-  Text,
-  Pressable,
-  TextInput,
-  ScrollView,
-  StyleSheet,
-  Modal,
-  Alert,
-  ActivityIndicator,
-  Platform,
-} from "react-native";
-
-import AsyncStorage from "@react-native-async-storage/async-storage";
-import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { NavigationContainer } from "@react-navigation/native";
-import { createDrawerNavigator } from "@react-navigation/drawer";
-import { createStackNavigator } from "@react-navigation/stack";
-
-// -------------------- Context --------------------
-const AppCtx = createContext(null);
-const useApp = () => useContext(AppCtx);
-
-// -------------------- STORAGE KEYS --------------------
-const STORAGE_KEY = "CUT_LOGGER_V1";
-
-// -------------------- Updated starter workouts (Push / Pull, no gym) --------------------
-const SEED_WORKOUTS = [
-  {
-    id: "w_push",
-    name: "PUSH (Home) — Chest / Shoulders / Triceps / Quads",
-    items: [
-      "Warm-up 3–5 min: arm circles + bodyweight squats + shoulder taps",
-      "Incline push-ups (hands on bed/sofa) x10–20 (regress) OR normal x6–15",
-      "Pike push-ups x6–12 (shoulders) OR wall pike hold 20–40s",
-      "Chair dips x6–12 (triceps) OR bench dip with knees bent x8–15",
-      "Split squats x8–15 each leg (slow)",
-      "Wall sit 45–75s",
-      "Optional finisher: slow push-ups AMRAP (stop 1–2 reps before failure)",
-      "Rest 45–75s between exercises. 3–5 rounds total.",
-    ],
-  },
-  {
-    id: "w_pull",
-    name: "PULL (Home) — Back / Biceps / Glutes / Hamstrings / Core",
-    items: [
-      "Warm-up 3–5 min: hip hinges + glute bridges + scap squeezes",
-      "Backpack rows x10–20 (fill bag with books/water bottles)",
-      "Towel rows (door-anchored carefully) x6–15 OR backpack row again",
-      "Biceps curls (backpack or bottles) x10–20",
-      "Romanian deadlift (backpack) x10–20 (slow hinge)",
-      "Glute bridges x12–25 (pause at top 1s)",
-      "Dead bug x10–16 total OR plank 45–75s",
-      "Rest 45–75s between exercises. 3–5 rounds total.",
-    ],
-  },
+const CATEGORIES = [
+  { key: "protein", label: "Protein" },
+  { key: "calories", label: "Calories" },
+  { key: "salt", label: "Salt" },
+  { key: "potassium", label: "Potassium" },
+  { key: "sugar", label: "Sugar" },
+  { key: "meal", label: "Meal" },
+  { key: "snack", label: "Snack" },
 ];
 
-// -------------------- Tips library (kept same idea) --------------------
 const TIP_LIBRARY = [
   "Keep calories 1400–1500 (adjust if you feel weak).",
   "Hit 90g+ protein daily. 3 proper meals spaced out.",
@@ -79,18 +25,38 @@ const TIP_LIBRARY = [
   "After 10 days + 15k steps: add 200–300 calories back.",
 ];
 
-// -------------------- Categories --------------------
-const CATEGORIES = [
-  { key: "protein", label: "Protein" },
-  { key: "calories", label: "Calories" },
-  { key: "salt", label: "Salt" },
-  { key: "potassium", label: "Potassium" },
-  { key: "sugar", label: "Sugar" },
-  { key: "meal", label: "Meal" },
-  { key: "snack", label: "Snack" },
+const SEED_WORKOUTS = [
+  {
+    id: "w_push",
+    name: "PUSH (Home) — Chest / Shoulders / Triceps / Quads",
+    items: [
+      "Warm-up 3–5 min: arm circles + squats + shoulder taps",
+      "Incline push-ups (hands on bed/sofa) x10–20 OR normal x6–15",
+      "Pike push-ups x6–12 OR wall pike hold 20–40s",
+      "Chair dips x6–12 OR bench dips x8–15",
+      "Split squats x8–15 each leg (slow)",
+      "Wall sit 45–75s",
+      "Rest 45–75s between exercises. 3–5 rounds total.",
+    ],
+  },
+  {
+    id: "w_pull",
+    name: "PULL (Home) — Back / Biceps / Glutes / Hamstrings / Core",
+    items: [
+      "Warm-up 3–5 min: hip hinges + glute bridges + scap squeezes",
+      "Backpack rows x10–20 (fill bag with books/water bottles)",
+      "Towel rows (door-anchored carefully) x6–15 OR backpack rows again",
+      "Biceps curls (backpack or bottles) x10–20",
+      "Romanian deadlift (backpack) x10–20 (slow hinge)",
+      "Glute bridges x12–25 (pause 1s at top)",
+      "Dead bug x10–16 total OR plank 45–75s",
+      "Rest 45–75s between exercises. 3–5 rounds total.",
+    ],
+  },
 ];
 
-// -------------------- Helpers --------------------
+const STORAGE_KEY = "CUT_TRACKER_WEB_V1";
+
 function todayISO() {
   const d = new Date();
   const yyyy = d.getFullYear();
@@ -99,31 +65,33 @@ function todayISO() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function scoreFromLogs(logs) {
-  let green = 0,
-    yellow = 0,
-    red = 0;
+function safeParse(raw, fallback) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
 
+function scoreFromLogs(logs) {
+  let green = 0, yellow = 0, red = 0;
   for (const l of logs) {
     if (l.status === "good") green++;
     if (l.status === "mid") yellow++;
     if (l.status === "bad") red++;
   }
-
   const total = green + yellow + red;
   const points = green * 2 + yellow * 1 + red * 0;
   const pct = total === 0 ? 0 : Math.round((points / (total * 2)) * 100);
-
   return { green, yellow, red, total, points, pct };
 }
 
 function badgeColours(status) {
-  if (status === "good") return { bg: "#0F5132", fg: "#D1E7DD" };
-  if (status === "mid") return { bg: "#664D03", fg: "#FFF3CD" };
-  return { bg: "#842029", fg: "#F8D7DA" };
+  if (status === "good") return { bg: "#0F5132", fg: "#D1E7DD", icon: "✅" };
+  if (status === "mid") return { bg: "#664D03", fg: "#FFF3CD", icon: "⚠️" };
+  return { bg: "#842029", fg: "#F8D7DA", icon: "❌" };
 }
 
-// -------------------- Food evaluation (same logic style) --------------------
 function evaluateFood({ categoryKey, foodName, calories, protein, sugar, salt }) {
   const name = (foodName || "").trim().toLowerCase();
   const cals = Number(calories || 0);
@@ -146,18 +114,12 @@ function evaluateFood({ categoryKey, foodName, calories, protein, sugar, salt })
 
   if (categoryKey === "protein") {
     if (prot >= 20 && cals <= 350 && sug <= 8) {
-      status = "good";
-      title = "Good choice";
-      why.push("High protein for the calories.");
+      status = "good"; title = "Good choice"; why.push("High protein for the calories.");
     } else if (prot >= 10) {
-      status = "mid";
-      title = "Okay, could be better";
-      why.push("Some protein, but not great per calorie.");
+      status = "mid"; title = "Okay, could be better"; why.push("Some protein, but not great per calorie.");
       tipsShould.push("Pick a leaner protein option next time.");
     } else {
-      status = "bad";
-      title = "Not helping your protein goal";
-      why.push("Too low protein for your cut.");
+      status = "bad"; title = "Not helping your protein goal"; why.push("Too low protein for your cut.");
       tipsShould.push("Swap to eggs, tuna, lentils, yoghurt, beans.");
       tipsShould.push("Make each meal protein-centred.");
     }
@@ -165,18 +127,12 @@ function evaluateFood({ categoryKey, foodName, calories, protein, sugar, salt })
 
   if (categoryKey === "calories") {
     if (cals <= 250) {
-      status = "good";
-      title = "Low calorie win";
-      why.push("Easy to stay in deficit.");
+      status = "good"; title = "Low calorie win"; why.push("Easy to stay in deficit.");
     } else if (cals <= 450) {
-      status = "mid";
-      title = "Manageable, watch the rest of the day";
-      why.push("This can fit, but don’t stack heavy foods.");
+      status = "mid"; title = "Manageable, watch the rest of the day"; why.push("This can fit, but don’t stack heavy foods.");
       tipsShould.push("Keep the next meal lighter.");
     } else {
-      status = "bad";
-      title = "Too heavy for a tight cut";
-      why.push("High calories makes 1400–1500 harder.");
+      status = "bad"; title = "Too heavy for a tight cut"; why.push("High calories makes 1400–1500 harder.");
       tipsShould.push("Reduce portion or swap to higher-volume foods.");
       tipsShould.push("Avoid sugary/processed extras.");
     }
@@ -184,18 +140,12 @@ function evaluateFood({ categoryKey, foodName, calories, protein, sugar, salt })
 
   if (categoryKey === "sugar") {
     if (sug <= 5) {
-      status = "good";
-      title = "Low sugar";
-      why.push("Helps debloat and keeps cravings down.");
+      status = "good"; title = "Low sugar"; why.push("Helps debloat and keeps cravings down.");
     } else if (sug <= 15) {
-      status = "mid";
-      title = "A bit sugary";
-      why.push("Okay sometimes, but keep it controlled.");
+      status = "mid"; title = "A bit sugary"; why.push("Okay sometimes, but keep it controlled.");
       tipsShould.push("Choose lower sugar options more often.");
     } else {
-      status = "bad";
-      title = "Too much sugar";
-      why.push("Likely to spike cravings and add junk calories.");
+      status = "bad"; title = "Too much sugar"; why.push("Likely to spike cravings and add junk calories.");
       tipsShould.push("Swap to protein + fruit/veg instead.");
       tipsShould.push("Avoid fizzy drinks and sweets.");
     }
@@ -203,18 +153,12 @@ function evaluateFood({ categoryKey, foodName, calories, protein, sugar, salt })
 
   if (categoryKey === "salt") {
     if (sal <= 0.6) {
-      status = "good";
-      title = "Low salt";
-      why.push("Better for debloating.");
+      status = "good"; title = "Low salt"; why.push("Better for debloating.");
     } else if (sal <= 1.5) {
-      status = "mid";
-      title = "Moderate salt";
-      why.push("Fine, but don’t stack salty foods today.");
+      status = "mid"; title = "Moderate salt"; why.push("Fine, but don’t stack salty foods today.");
       tipsShould.push("Drink water and keep the next meal lower salt.");
     } else {
-      status = "bad";
-      title = "High salt";
-      why.push("Can cause water retention and bloat.");
+      status = "bad"; title = "High salt"; why.push("Can cause water retention and bloat.");
       tipsShould.push("Reduce salt for the rest of the day.");
       tipsShould.push("Add potassium foods + water.");
     }
@@ -229,31 +173,21 @@ function evaluateFood({ categoryKey, foodName, calories, protein, sugar, salt })
       name.includes("yoghurt");
 
     if (isPotassiumFood) {
-      status = "good";
-      title = "Potassium boost";
-      why.push("Supports debloat when salt is lower.");
+      status = "good"; title = "Potassium boost"; why.push("Supports debloat when salt is lower.");
     } else {
-      status = "mid";
-      title = "Okay, add a potassium side";
-      why.push("Not clearly potassium-focused.");
+      status = "mid"; title = "Okay, add a potassium side"; why.push("Not clearly potassium-focused.");
       tipsShould.push("Add banana, potato, spinach, beans, yoghurt.");
     }
   }
 
   if (categoryKey === "meal") {
     if (prot >= 25 && cals <= 550 && sug <= 10) {
-      status = "good";
-      title = "Good meal for the cut";
-      why.push("Protein-forward and controlled calories.");
+      status = "good"; title = "Good meal for the cut"; why.push("Protein-forward and controlled calories.");
     } else if (cals <= 700) {
-      status = "mid";
-      title = "Meal is okay, tighten the balance";
-      why.push("Keep protein up and keep calories controlled.");
+      status = "mid"; title = "Meal is okay, tighten the balance"; why.push("Keep protein up and keep calories controlled.");
       tipsShould.push("Add lean protein. Reduce sauces/fats.");
     } else {
-      status = "bad";
-      title = "Meal is too heavy";
-      why.push("Too high calorie for a tight deficit.");
+      status = "bad"; title = "Meal is too heavy"; why.push("Too high calorie for a tight deficit.");
       tipsShould.push("Smaller portion + add veg.");
       tipsShould.push("Keep next meal lighter.");
     }
@@ -261,18 +195,12 @@ function evaluateFood({ categoryKey, foodName, calories, protein, sugar, salt })
 
   if (categoryKey === "snack") {
     if (cals <= 200 && (prot >= 10 || sug <= 8)) {
-      status = "good";
-      title = "Good snack";
-      why.push("Fits the cut without wrecking calories.");
+      status = "good"; title = "Good snack"; why.push("Fits the cut without wrecking calories.");
     } else if (cals <= 300) {
-      status = "mid";
-      title = "Snack is okay, but be careful";
-      why.push("Can fit, but don’t keep stacking snacks.");
+      status = "mid"; title = "Snack is okay, but be careful"; why.push("Can fit, but don’t keep stacking snacks.");
       tipsShould.push("Prefer protein snacks (yoghurt, eggs, tuna).");
     } else {
-      status = "bad";
-      title = "Snack is too big";
-      why.push("Too many calories for a snack on a cut.");
+      status = "bad"; title = "Snack is too big"; why.push("Too many calories for a snack on a cut.");
       tipsShould.push("Swap to higher-protein, lower-cal snack.");
     }
   }
@@ -283,111 +211,248 @@ function evaluateFood({ categoryKey, foodName, calories, protein, sugar, salt })
   return { status, title, why, tipsDoing, tipsShould };
 }
 
-// -------------------- Screens --------------------
-function CategoryScreen({ navigation }) {
-  const { dayState, startNewDay, endDay, dayLogs, endedDays } = useApp();
-  const dayEnded = dayState.status === "ENDED";
+export default function App() {
+  const initial = useMemo(() => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      return {
+        workouts: SEED_WORKOUTS,
+        dayState: { date: todayISO(), status: "LOCKED" },
+        dayLogs: [],
+        endedDays: [],
+      };
+    }
+    const parsed = safeParse(raw, null);
+    if (!parsed) {
+      return {
+        workouts: SEED_WORKOUTS,
+        dayState: { date: todayISO(), status: "LOCKED" },
+        dayLogs: [],
+        endedDays: [],
+      };
+    }
+    return {
+      workouts: parsed.workouts?.length ? parsed.workouts : SEED_WORKOUTS,
+      dayState: parsed.dayState || { date: todayISO(), status: "LOCKED" },
+      dayLogs: Array.isArray(parsed.dayLogs) ? parsed.dayLogs : [],
+      endedDays: Array.isArray(parsed.endedDays) ? parsed.endedDays : [],
+    };
+  }, []);
+
+  const [workouts, setWorkouts] = useState(initial.workouts);
+  const [dayState, setDayState] = useState(initial.dayState);
+  const [dayLogs, setDayLogs] = useState(initial.dayLogs);
+  const [endedDays, setEndedDays] = useState(initial.endedDays);
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  const [page, setPage] = useState("home"); // home | food | tips | end | workouts | allTips | ai
+  const [pickedCategory, setPickedCategory] = useState(null);
+  const [pickedFood, setPickedFood] = useState(null);
+
+  const persist = (next) => localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+
+  const saveAll = (next) => {
+    setWorkouts(next.workouts);
+    setDayState(next.dayState);
+    setDayLogs(next.dayLogs);
+    setEndedDays(next.endedDays);
+    persist(next);
+  };
+
+  const startNewDay = () => {
+    const next = { workouts, dayState: { date: todayISO(), status: "ACTIVE" }, dayLogs, endedDays };
+    saveAll(next);
+  };
+
+  const addLog = (entry) => {
+    const nextLogs = [...dayLogs, entry];
+    const next = { workouts, dayState, dayLogs: nextLogs, endedDays };
+    saveAll(next);
+  };
+
+  const endDay = () => {
+    const summary = scoreFromLogs(dayLogs);
+    const endedDay = { date: dayState.date, logs: [...dayLogs], summary };
+    const nextEnded = [...endedDays, endedDay];
+
+    const next = {
+      workouts,
+      dayState: { date: todayISO(), status: "LOCKED" },
+      dayLogs: [],
+      endedDays: nextEnded,
+    };
+
+    saveAll(next);
+
+    setPage("end");
+    setPickedFood({ endedDay });
+  };
+
   const dayLocked = dayState.status === "LOCKED";
+  const dayEnded = dayState.status === "ENDED";
   const summary = useMemo(() => scoreFromLogs(dayLogs), [dayLogs]);
 
+  const goHome = () => {
+    setPage("home");
+    setPickedCategory(null);
+    setPickedFood(null);
+  };
+
   return (
-    <View style={styles.screen}>
-      <View style={styles.headerRow}>
-        <Pressable onPress={() => navigation.openDrawer()} style={styles.iconBtn}>
-          <Text style={styles.iconText}>☰</Text>
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.h1}>Cut Logger</Text>
-          <Text style={styles.subtle}>Today: {dayState.date}</Text>
-        </View>
-      </View>
+    <>
+      {sidebarOpen && (
+        <>
+          <div className="sidebarOverlay" onClick={() => setSidebarOpen(false)} />
+          <div className="sidebar">
+            <div className="sideTitle">Menu</div>
+            <div className="sideItem" onClick={() => { setSidebarOpen(false); goHome(); }}>
+              Home
+            </div>
+            <div className="sideItem" onClick={() => { setSidebarOpen(false); setPage("workouts"); }}>
+              Workouts
+            </div>
+            <div className="sideItem" onClick={() => { setSidebarOpen(false); setPage("allTips"); }}>
+              All tips
+            </div>
+            <div className="sideItem" onClick={() => { setSidebarOpen(false); setPage("ai"); }}>
+              AI
+            </div>
+          </div>
+        </>
+      )}
 
-      <Modal visible={dayLocked} transparent animationType="fade">
-        <View style={styles.lockOverlay}>
-          <View style={styles.lockCard}>
-            <Text style={styles.h2}>Ready to start?</Text>
-            <Text style={styles.p}>Press start to begin today.</Text>
-            <Pressable onPress={startNewDay} style={[styles.primaryBtn, { width: "100%" }]}>
-              <Text style={styles.primaryBtnText}>Start new day</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
+      {dayLocked && page === "home" && (
+        <div className="modalOverlay">
+          <div className="modal">
+            <div style={{ fontWeight: 900, fontSize: 18 }}>Ready to start?</div>
+            <div className="subtle" style={{ marginTop: 6 }}>Press start to begin today.</div>
+            <button className="btnPrimary" onClick={startNewDay}>Start new day</button>
+          </div>
+        </div>
+      )}
 
-      <Text style={styles.sectionTitle}>Categories</Text>
-      <View style={styles.chipsWrap}>
-        {CATEGORIES.map((c) => (
-          <View key={c.key} style={styles.chip}>
-            <Text style={styles.chipText}>{c.label}</Text>
-          </View>
-        ))}
-      </View>
+      <div className="container">
+        <div className="topbar">
+          <div className="iconBtn" onClick={() => setSidebarOpen(true)}>☰</div>
+          <div style={{ flex: 1 }}>
+            <div className="h1">Cut Tracker</div>
+            <div className="subtle">Today: {dayState.date}</div>
+          </div>
+          {page !== "home" && (
+            <div className="iconBtn" onClick={goHome}>←</div>
+          )}
+        </div>
 
-      <Text style={styles.sectionTitle}>Pick one</Text>
-      <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
-        {CATEGORIES.map((c) => (
-          <Pressable
-            key={c.key}
-            style={[styles.card, dayEnded && styles.cardDisabled]}
-            disabled={dayEnded}
-            onPress={() => navigation.navigate("Food", { category: c })}
-          >
-            <Text style={styles.cardTitle}>{c.label}</Text>
-            <Text style={styles.cardSub}>Log something for {c.label.toLowerCase()}.</Text>
-          </Pressable>
-        ))}
+        {page === "home" && (
+          <>
+            <div className="sectionTitle">Categories</div>
+            <div className="chips">
+              {CATEGORIES.map((c) => (
+                <div key={c.key} className="chip">{c.label}</div>
+              ))}
+            </div>
 
-        <View style={styles.scoreBox}>
-          <Text style={styles.scoreTitle}>Today so far</Text>
-          <Text style={styles.scoreLine}>
-            Green: {summary.green} · Yellow: {summary.yellow} · Red: {summary.red}
-          </Text>
-          <Text style={styles.scoreLine}>Score: {summary.pct}%</Text>
-        </View>
+            <div className="sectionTitle">Pick one</div>
+            {CATEGORIES.map((c) => (
+              <div
+                key={c.key}
+                className="card"
+                style={{ opacity: dayLocked ? 0.75 : 1, cursor: dayLocked ? "not-allowed" : "pointer" }}
+                onClick={() => {
+                  if (dayLocked) return;
+                  setPickedCategory(c);
+                  setPage("food");
+                }}
+              >
+                <div className="cardTitle">{c.label}</div>
+                <p className="cardSub">Log something for {c.label.toLowerCase()}.</p>
+              </div>
+            ))}
 
-        <Text style={styles.sectionTitle}>Previous days</Text>
-        {endedDays.length === 0 ? (
-          <Text style={styles.subtle}>No previous days yet.</Text>
-        ) : (
-          endedDays
-            .slice()
-            .reverse()
-            .map((d) => (
-              <View key={d.date} style={styles.prevDayCard}>
-                <Text style={styles.prevDayTitle}>{d.date}</Text>
-                <Text style={styles.prevDaySub}>
-                  Green {d.summary.green} · Yellow {d.summary.yellow} · Red {d.summary.red} · Score{" "}
-                  {d.summary.pct}%
-                </Text>
-              </View>
-            ))
+            <div className="scoreBox">
+              <div className="cardTitle" style={{ marginBottom: 4 }}>Today so far</div>
+              <div className="subtle">Green: {summary.green} · Yellow: {summary.yellow} · Red: {summary.red}</div>
+              <div className="subtle">Score: {summary.pct}%</div>
+            </div>
+
+            <div className="sectionTitle">Previous days</div>
+            {endedDays.length === 0 ? (
+              <div className="subtle">No previous days yet.</div>
+            ) : (
+              [...endedDays].reverse().map((d) => (
+                <div key={d.date} className="card">
+                  <div className="cardTitle">{d.date}</div>
+                  <div className="subtle">
+                    Green {d.summary.green} · Yellow {d.summary.yellow} · Red {d.summary.red} · Score {d.summary.pct}%
+                  </div>
+                </div>
+              ))
+            )}
+
+            <div className="bottomBar">
+              <div
+                className={`endBtn ${(dayLocked || dayLogs.length === 0) ? "disabled" : ""}`}
+                onClick={() => {
+                  if (dayLocked) return;
+                  if (dayLogs.length === 0) return;
+                  endDay();
+                }}
+              >
+                {dayLocked ? "Start the day first" : (dayLogs.length === 0 ? "Log something first" : "End day")}
+              </div>
+            </div>
+          </>
         )}
-      </ScrollView>
 
-      <View style={styles.bottomBar}>
-        <Pressable
-          style={[styles.endDayBtn, (dayEnded || dayLocked) && styles.endDayBtnDisabled]}
-          disabled={dayEnded || dayLocked}
-          onPress={() => {
-            if (dayLogs.length === 0) {
-              Alert.alert("Nothing logged yet", "Log at least one thing before ending the day.");
-              return;
-            }
-            endDay(navigation);
-          }}
-        >
-          <Text style={styles.endDayBtnText}>
-            {dayLocked ? "Start the day first" : dayEnded ? "Day ended" : "End day"}
-          </Text>
-        </Pressable>
-      </View>
-    </View>
+        {page === "food" && pickedCategory && <FoodPage
+          category={pickedCategory}
+          onContinue={(food) => { setPickedFood(food); setPage("tips"); }}
+        />}
+
+        {page === "tips" && pickedCategory && pickedFood && (
+          <TipsPage
+            category={pickedCategory}
+            food={pickedFood}
+            dayActive={dayState.status === "ACTIVE"}
+            onYes={() => {
+              const result = evaluateFood({ categoryKey: pickedCategory.key, ...pickedFood });
+              addLog({
+                id: String(Date.now()),
+                ts: new Date().toISOString(),
+                category: pickedCategory.label,
+                categoryKey: pickedCategory.key,
+                foodName: (pickedFood.foodName || "Unknown").trim() || "Unknown",
+                calories: Number(pickedFood.calories || 0),
+                protein: Number(pickedFood.protein || 0),
+                sugar: Number(pickedFood.sugar || 0),
+                salt: Number(pickedFood.salt || 0),
+                status: result.status,
+              });
+              goHome();
+            }}
+            onNo={goHome}
+          />
+        )}
+
+        {page === "end" && pickedFood?.endedDay && <EndPage endedDay={pickedFood.endedDay} />}
+
+        {page === "workouts" && (
+          <WorkoutsPage workouts={workouts} setWorkouts={(next) => {
+            const nextAll = { workouts: next, dayState, dayLogs, endedDays };
+            saveAll(nextAll);
+          }} />
+        )}
+
+        {page === "allTips" && <AllTipsPage />}
+
+        {page === "ai" && <AIPage />}
+      </div>
+    </>
   );
 }
 
-function FoodScreen({ navigation, route }) {
-  const { category } = route.params;
-
+function FoodPage({ category, onContinue }) {
   const [foodName, setFoodName] = useState("");
   const [calories, setCalories] = useState("");
   const [protein, setProtein] = useState("");
@@ -395,801 +460,281 @@ function FoodScreen({ navigation, route }) {
   const [salt, setSalt] = useState("");
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.headerRow}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
-          <Text style={styles.iconText}>←</Text>
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.h1}>Pick food</Text>
-          <Text style={styles.subtle}>Category: {category.label}</Text>
-        </View>
-      </View>
+    <>
+      <div className="sectionTitle">Pick food</div>
+      <div className="card">
+        <div className="cardTitle">Category: {category.label}</div>
 
-      <View style={styles.foodBar}>
-        <Text style={styles.label}>Food</Text>
-        <TextInput
-          value={foodName}
-          onChangeText={setFoodName}
-          placeholder="e.g. tuna, eggs, banana"
-          placeholderTextColor="#7A7A7A"
-          style={styles.input}
-        />
+        <div className="label">Food</div>
+        <input className="input" value={foodName} onChange={(e) => setFoodName(e.target.value)} placeholder="e.g. tuna, eggs, banana" />
 
-        <View style={styles.row2}>
-          <View style={styles.col}>
-            <Text style={styles.label}>Calories</Text>
-            <TextInput
-              value={calories}
-              onChangeText={setCalories}
-              keyboardType="numeric"
-              placeholder="e.g. 250"
-              placeholderTextColor="#7A7A7A"
-              style={styles.input}
-            />
-          </View>
-          <View style={styles.col}>
-            <Text style={styles.label}>Protein (g)</Text>
-            <TextInput
-              value={protein}
-              onChangeText={setProtein}
-              keyboardType="numeric"
-              placeholder="e.g. 25"
-              placeholderTextColor="#7A7A7A"
-              style={styles.input}
-            />
-          </View>
-        </View>
+        <div className="row2">
+          <div className="col">
+            <div className="label">Calories</div>
+            <input className="input" value={calories} onChange={(e) => setCalories(e.target.value)} placeholder="e.g. 250" />
+          </div>
+          <div className="col">
+            <div className="label">Protein (g)</div>
+            <input className="input" value={protein} onChange={(e) => setProtein(e.target.value)} placeholder="e.g. 25" />
+          </div>
+        </div>
 
-        <View style={styles.row2}>
-          <View style={styles.col}>
-            <Text style={styles.label}>Sugar (g)</Text>
-            <TextInput
-              value={sugar}
-              onChangeText={setSugar}
-              keyboardType="numeric"
-              placeholder="e.g. 5"
-              placeholderTextColor="#7A7A7A"
-              style={styles.input}
-            />
-          </View>
-          <View style={styles.col}>
-            <Text style={styles.label}>Salt (g)</Text>
-            <TextInput
-              value={salt}
-              onChangeText={setSalt}
-              keyboardType="numeric"
-              placeholder="e.g. 0.6"
-              placeholderTextColor="#7A7A7A"
-              style={styles.input}
-            />
-          </View>
-        </View>
+        <div className="row2">
+          <div className="col">
+            <div className="label">Sugar (g)</div>
+            <input className="input" value={sugar} onChange={(e) => setSugar(e.target.value)} placeholder="e.g. 5" />
+          </div>
+          <div className="col">
+            <div className="label">Salt (g)</div>
+            <input className="input" value={salt} onChange={(e) => setSalt(e.target.value)} placeholder="e.g. 0.6" />
+          </div>
+        </div>
 
-        <Pressable
-          style={styles.primaryBtn}
-          onPress={() =>
-            navigation.navigate("Tips", {
-              category,
-              food: { foodName, calories, protein, sugar, salt },
-            })
-          }
+        <button
+          className="btnPrimary"
+          onClick={() => onContinue({ foodName, calories, protein, sugar, salt })}
         >
-          <Text style={styles.primaryBtnText}>Continue</Text>
-        </Pressable>
-      </View>
-    </View>
+          Continue
+        </button>
+      </div>
+    </>
   );
 }
 
-function TipsScreen({ navigation, route }) {
-  const { category, food } = route.params;
-  const { addLog, dayState } = useApp();
-
-  const result = useMemo(
-    () => evaluateFood({ categoryKey: category.key, ...food }),
-    [category.key, food]
-  );
-
+function TipsPage({ category, food, dayActive, onYes, onNo }) {
+  const result = useMemo(() => evaluateFood({ categoryKey: category.key, ...food }), [category.key, food]);
   const colours = badgeColours(result.status);
-  const icon = result.status === "good" ? "✅" : result.status === "mid" ? "⚠️" : "❌";
-
-  const finalise = (yes) => {
-    if (!yes) {
-      navigation.popToTop();
-      return;
-    }
-
-    if (dayState.status !== "ACTIVE") {
-      Alert.alert("Day not active", "Press Start new day first.");
-      navigation.popToTop();
-      return;
-    }
-
-    addLog({
-      id: String(Date.now()),
-      ts: new Date().toISOString(),
-      category: category.label,
-      categoryKey: category.key,
-      foodName: (food.foodName || "Unknown").trim() || "Unknown",
-      calories: Number(food.calories || 0),
-      protein: Number(food.protein || 0),
-      sugar: Number(food.sugar || 0),
-      salt: Number(food.salt || 0),
-      status: result.status,
-    });
-
-    navigation.popToTop();
-  };
 
   return (
-    <View style={styles.screen}>
-      <View style={styles.headerRow}>
-        <Pressable onPress={() => navigation.goBack()} style={styles.iconBtn}>
-          <Text style={styles.iconText}>←</Text>
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.h1}>Tips</Text>
-          <Text style={styles.subtle}>
-            {category.label} · {food.foodName || "Food"}
-          </Text>
-        </View>
-      </View>
+    <>
+      <div className="banner" style={{ background: colours.bg, color: colours.fg }}>
+        {colours.icon} {result.title}
+      </div>
 
-      <View style={[styles.banner, { backgroundColor: colours.bg }]}>
-        <Text style={[styles.bannerText, { color: colours.fg }]}>
-          {icon} {result.title}
-        </Text>
-      </View>
+      <div className="card">
+        <div className="cardTitle">Why</div>
+        {result.why.map((w, i) => <div key={i} className="bullet">• {w}</div>)}
+      </div>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Why</Text>
-          {result.why.map((w, i) => (
-            <Text key={i} style={styles.bullet}>
-              • {w}
-            </Text>
+      {result.status !== "bad" && (
+        <div className="card">
+          <div className="cardTitle">Tips you’re doing</div>
+          {result.tipsDoing.map((t, i) => <div key={i} className="bullet">• {t}</div>)}
+        </div>
+      )}
+
+      {result.status !== "good" && (
+        <div className="card">
+          <div className="cardTitle">{result.status === "mid" ? "Tips you should do" : "What you need to do"}</div>
+          {(result.tipsShould.length ? result.tipsShould : ["Tighten the next choice."]).map((t, i) => (
+            <div key={i} className="bullet">• {t}</div>
           ))}
-        </View>
+        </div>
+      )}
 
-        {result.status === "good" && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>Tips you’re doing</Text>
-            {result.tipsDoing.map((t, i) => (
-              <Text key={i} style={styles.bullet}>
-                • {t}
-              </Text>
-            ))}
-          </View>
+      <div className="card">
+        <div className="cardTitle">Final validation</div>
+        <div className="subtle">Log this for today?</div>
+
+        {!dayActive && (
+          <div className="subtle" style={{ marginTop: 8 }}>
+            Day not active. Go Home and press “Start new day”.
+          </div>
         )}
 
-        {result.status === "mid" && (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Tips you’re doing</Text>
-              {result.tipsDoing.map((t, i) => (
-                <Text key={i} style={styles.bullet}>
-                  • {t}
-                </Text>
-              ))}
-            </View>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Tips you should do</Text>
-              {(result.tipsShould.length ? result.tipsShould : ["Tighten the next choice."]).map(
-                (t, i) => (
-                  <Text key={i} style={styles.bullet}>
-                    • {t}
-                  </Text>
-                )
-              )}
-            </View>
-          </>
-        )}
-
-        {result.status === "bad" && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>What you need to do</Text>
-            {(result.tipsShould.length ? result.tipsShould : ["Swap to a better option."]).map(
-              (t, i) => (
-                <Text key={i} style={styles.bullet}>
-                  • {t}
-                </Text>
-              )
-            )}
-          </View>
-        )}
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Final validation</Text>
-          <Text style={styles.p}>Log this for today?</Text>
-
-          <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
-            <Pressable style={[styles.primaryBtn, { flex: 1 }]} onPress={() => finalise(true)}>
-              <Text style={styles.primaryBtnText}>Yes</Text>
-            </Pressable>
-            <Pressable style={[styles.ghostBtn, { flex: 1 }]} onPress={() => finalise(false)}>
-              <Text style={styles.ghostBtnText}>No</Text>
-            </Pressable>
-          </View>
-        </View>
-      </ScrollView>
-    </View>
+        <div className="row2" style={{ marginTop: 10 }}>
+          <button className="btnPrimary" onClick={() => dayActive && onYes()} disabled={!dayActive}>
+            Yes
+          </button>
+          <button className="btnGhost" onClick={onNo}>No</button>
+        </div>
+      </div>
+    </>
   );
 }
 
-function EndOfDayScreen({ route, navigation }) {
-  const { endedDay } = route.params;
-
+function EndPage({ endedDay }) {
   return (
-    <View style={styles.screen}>
-      <View style={styles.headerRow}>
-        <Pressable onPress={() => navigation.popToTop()} style={styles.iconBtn}>
-          <Text style={styles.iconText}>←</Text>
-        </Pressable>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.h1}>Good night</Text>
-          <Text style={styles.subtle}>Day ended: {endedDay.date}</Text>
-        </View>
-      </View>
+    <>
+      <div className="sectionTitle">Good night</div>
+      <div className="scoreBox">
+        <div className="cardTitle">Your score</div>
+        <div className="subtle">
+          Green: {endedDay.summary.green} · Yellow: {endedDay.summary.yellow} · Red: {endedDay.summary.red}
+        </div>
+        <div className="subtle">Score: {endedDay.summary.pct}%</div>
+      </div>
 
-      <View style={styles.scoreBox}>
-        <Text style={styles.scoreTitle}>Your score</Text>
-        <Text style={styles.scoreLine}>
-          Green: {endedDay.summary.green} · Yellow: {endedDay.summary.yellow} · Red:{" "}
-          {endedDay.summary.red}
-        </Text>
-        <Text style={styles.scoreLine}>Score: {endedDay.summary.pct}%</Text>
-      </View>
-
-      <Text style={styles.sectionTitle}>What you logged</Text>
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        {endedDay.logs
-          .slice()
-          .reverse()
-          .map((l) => {
-            const c = badgeColours(l.status);
-            const icon = l.status === "good" ? "✅" : l.status === "mid" ? "⚠️" : "❌";
-            return (
-              <View key={l.id} style={[styles.card, { borderLeftWidth: 6, borderLeftColor: c.bg }]}>
-                <Text style={styles.cardTitle}>
-                  {icon} {l.category} · {l.foodName}
-                </Text>
-                <Text style={styles.subtle}>
-                  {l.calories} kcal · {l.protein}g protein · {l.sugar}g sugar · {l.salt}g salt
-                </Text>
-              </View>
-            );
-          })}
-      </ScrollView>
-    </View>
+      <div className="sectionTitle">What you logged</div>
+      {[...endedDay.logs].reverse().map((l) => {
+        const c = badgeColours(l.status);
+        return (
+          <div key={l.id} className="card" style={{ borderLeft: `6px solid ${c.bg}` }}>
+            <div className="cardTitle">{c.icon} {l.category} · {l.foodName}</div>
+            <div className="subtle">{l.calories} kcal · {l.protein}g protein · {l.sugar}g sugar · {l.salt}g salt</div>
+          </div>
+        );
+      })}
+    </>
   );
 }
 
-function WorkoutsScreen() {
-  const { workouts, setWorkouts } = useApp();
+function WorkoutsPage({ workouts, setWorkouts }) {
   const [name, setName] = useState("");
-  const [itemLine, setItemLine] = useState("");
+  const [line, setLine] = useState("");
   const [items, setItems] = useState([]);
 
-  const addItem = () => {
-    const t = itemLine.trim();
+  const addLine = () => {
+    const t = line.trim();
     if (!t) return;
-    setItems((prev) => [...prev, t]);
-    setItemLine("");
+    setItems((p) => [...p, t]);
+    setLine("");
   };
 
-  const addWorkout = () => {
+  const saveWorkout = () => {
     const n = name.trim();
-    if (!n || items.length === 0) {
-      Alert.alert("Missing info", "Add a name and at least one line.");
-      return;
-    }
-    setWorkouts((prev) => [...prev, { id: `w_${Date.now()}`, name: n, items: items.slice() }]);
-    setName("");
-    setItems([]);
-    setItemLine("");
+    if (!n || items.length === 0) return;
+    setWorkouts([...workouts, { id: `w_${Date.now()}`, name: n, items: [...items] }]);
+    setName(""); setItems([]); setLine("");
   };
 
-  const removeWorkout = (id) => setWorkouts((prev) => prev.filter((w) => w.id !== id));
+  const del = (id) => setWorkouts(workouts.filter((w) => w.id !== id));
 
   return (
-    <View style={styles.screen}>
-      <Text style={styles.h1}>Workouts</Text>
-      <Text style={styles.subtle}>Add or delete workouts.</Text>
+    <>
+      <div className="sectionTitle">Workouts</div>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Add workout</Text>
+      <div className="card">
+        <div className="cardTitle">Add workout</div>
 
-          <Text style={styles.label}>Name</Text>
-          <TextInput
-            value={name}
-            onChangeText={setName}
-            style={styles.input}
-            placeholder="Workout name"
-            placeholderTextColor="#7A7A7A"
-          />
+        <div className="label">Name</div>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Workout name" />
 
-          <Text style={styles.label}>Add lines</Text>
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <TextInput
-              value={itemLine}
-              onChangeText={setItemLine}
-              style={[styles.input, { flex: 1 }]}
-              placeholder="e.g. Push-ups x12"
-              placeholderTextColor="#7A7A7A"
-            />
-            <Pressable style={styles.smallBtn} onPress={addItem}>
-              <Text style={styles.smallBtnText}>Add</Text>
-            </Pressable>
-          </View>
+        <div className="label">Add lines</div>
+        <div className="row2">
+          <div className="col">
+            <input className="input" value={line} onChange={(e) => setLine(e.target.value)} placeholder="e.g. Push-ups x12" />
+          </div>
+          <div style={{ width: 110 }}>
+            <button className="btnPrimary" onClick={addLine} style={{ marginTop: 0 }}>Add</button>
+          </div>
+        </div>
 
-          {items.map((it, i) => (
-            <Text key={i} style={styles.bullet}>
-              • {it}
-            </Text>
-          ))}
+        {items.map((it, i) => <div key={i} className="bullet">• {it}</div>)}
 
-          <Pressable style={[styles.primaryBtn, { marginTop: 12 }]} onPress={addWorkout}>
-            <Text style={styles.primaryBtnText}>Save workout</Text>
-          </Pressable>
-        </View>
+        <button className="btnPrimary" onClick={saveWorkout}>Save workout</button>
+      </div>
 
-        <Text style={styles.sectionTitle}>Saved</Text>
-        {workouts.map((w) => (
-          <View key={w.id} style={styles.card}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
-              <Text style={[styles.cardTitle, { flex: 1 }]}>{w.name}</Text>
-              <Pressable onPress={() => removeWorkout(w.id)} style={styles.deleteBtn}>
-                <Text style={styles.deleteBtnText}>Delete</Text>
-              </Pressable>
-            </View>
-            {w.items.map((it, i) => (
-              <Text key={i} style={styles.bullet}>
-                • {it}
-              </Text>
-            ))}
-          </View>
-        ))}
-      </ScrollView>
-    </View>
+      <div className="sectionTitle">Saved</div>
+      {workouts.map((w) => (
+        <div className="card" key={w.id}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+            <div className="cardTitle" style={{ marginBottom: 0 }}>{w.name}</div>
+            <button className="btnGhost" onClick={() => del(w.id)} style={{ width: 110, marginTop: 0 }}>
+              Delete
+            </button>
+          </div>
+          {w.items.map((it, i) => <div key={i} className="bullet">• {it}</div>)}
+        </div>
+      ))}
+    </>
   );
 }
 
-function TipsLibraryScreen() {
+function AllTipsPage() {
   return (
-    <View style={styles.screen}>
-      <Text style={styles.h1}>All tips</Text>
-      <Text style={styles.subtle}>Quick reminders for your cut.</Text>
-
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        {TIP_LIBRARY.map((t, i) => (
-          <View key={i} style={styles.card}>
-            <Text style={styles.bullet}>• {t}</Text>
-          </View>
-        ))}
-      </ScrollView>
-    </View>
+    <>
+      <div className="sectionTitle">All tips</div>
+      {TIP_LIBRARY.map((t, i) => (
+        <div className="card" key={i}>
+          <div className="bullet">• {t}</div>
+        </div>
+      ))}
+    </>
   );
 }
 
-// -------------------- AI Screen (NEW) --------------------
-// Calls your backend proxy: EXPO_PUBLIC_AI_BASE_URL (e.g. https://your-api.example.com)
-function AIScreen() {
-  const [mode, setMode] = useState("workout"); // workout | food
+function AIPage() {
+  const [mode, setMode] = useState("workout");
   const [input, setInput] = useState("");
   const [constraints, setConstraints] = useState("No gym. Home only. Quiet options if possible.");
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState("");
-
-  const baseUrl =
-    process.env.EXPO_PUBLIC_AI_BASE_URL ||
-    (Platform.OS === "web" ? "http://localhost:8787" : "http://10.0.2.2:8787"); // android emulator hint
+  const [output, setOutput] = useState("");
 
   const run = async () => {
     const text = input.trim();
-    if (!text) {
-      Alert.alert("Missing", "Type something first.");
-      return;
-    }
+    if (!text) return;
+
     setLoading(true);
-    setResult("");
+    setOutput("");
 
     try {
-      const res = await fetch(`${baseUrl}/ai`, {
+      const res = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode,
-          input: text,
-          constraints: constraints.trim(),
-        }),
+        body: JSON.stringify({ mode, input: text, constraints }),
       });
-
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || "AI request failed");
-      setResult(data.output || "");
+      setOutput(data.output || "");
     } catch (e) {
-      setResult(`Error: ${e.message}`);
+      setOutput(`Error: ${e.message}`);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <View style={styles.screen}>
-      <Text style={styles.h1}>AI</Text>
-      <Text style={styles.subtle}>Simple substitutions + regressions.</Text>
+    <>
+      <div className="sectionTitle">AI</div>
 
-      <View style={[styles.card, { marginTop: 10 }]}>
-        <Text style={styles.cardTitle}>Pick</Text>
+      <div className="card">
+        <div className="cardTitle">Pick</div>
 
-        <View style={{ flexDirection: "row", gap: 10 }}>
-          <Pressable
-            onPress={() => setMode("workout")}
-            style={[
-              styles.toggleBtn,
-              mode === "workout" ? styles.toggleBtnActive : null,
-            ]}
+        <div className="row2" style={{ marginTop: 0 }}>
+          <button
+            className="btnGhost"
+            onClick={() => setMode("workout")}
+            style={{ marginTop: 0, borderColor: mode === "workout" ? "#2B4B85" : undefined }}
           >
-            <Text style={styles.toggleText}>Workout</Text>
-          </Pressable>
-
-          <Pressable
-            onPress={() => setMode("food")}
-            style={[styles.toggleBtn, mode === "food" ? styles.toggleBtnActive : null]}
+            Workout
+          </button>
+          <button
+            className="btnGhost"
+            onClick={() => setMode("food")}
+            style={{ marginTop: 0, borderColor: mode === "food" ? "#2B4B85" : undefined }}
           >
-            <Text style={styles.toggleText}>Food</Text>
-          </Pressable>
-        </View>
+            Food
+          </button>
+        </div>
 
-        <Text style={styles.label}>{mode === "workout" ? "Workout / Exercise" : "Food item"}</Text>
-        <TextInput
+        <div className="label">{mode === "workout" ? "Workout / Exercise" : "Food item"}</div>
+        <input
+          className="input"
           value={input}
-          onChangeText={setInput}
+          onChange={(e) => setInput(e.target.value)}
           placeholder={mode === "workout" ? "e.g. Push-ups hurt wrists" : "e.g. chocolate bar"}
-          placeholderTextColor="#7A7A7A"
-          style={styles.input}
         />
 
-        <Text style={styles.label}>Constraints (optional)</Text>
-        <TextInput
+        <div className="label">Constraints (optional)</div>
+        <input
+          className="input"
           value={constraints}
-          onChangeText={setConstraints}
+          onChange={(e) => setConstraints(e.target.value)}
           placeholder="e.g. knee pain, no jumping, vegetarian"
-          placeholderTextColor="#7A7A7A"
-          style={styles.input}
         />
 
-        <Pressable style={styles.primaryBtn} onPress={run} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator />
-          ) : (
-            <Text style={styles.primaryBtnText}>Get suggestions</Text>
-          )}
-        </Pressable>
-      </View>
+        <button className="btnPrimary" onClick={run} disabled={loading}>
+          {loading ? "Thinking…" : "Get suggestions"}
+        </button>
+      </div>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 120 }}>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Output</Text>
-          <Text style={[styles.p, { marginTop: 6 }]}>{result || "—"}</Text>
-        </View>
-      </ScrollView>
-    </View>
+      <div className="card">
+        <div className="cardTitle">Output</div>
+        <div className="bullet" style={{ whiteSpace: "pre-wrap" }}>
+          {output || "—"}
+        </div>
+      </div>
+    </>
   );
 }
-
-// -------------------- Navigation --------------------
-const Drawer = createDrawerNavigator();
-const Stack = createStackNavigator();
-
-function HomeStack() {
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Category" component={CategoryScreen} />
-      <Stack.Screen name="Food" component={FoodScreen} />
-      <Stack.Screen name="Tips" component={TipsScreen} />
-      <Stack.Screen name="EndOfDay" component={EndOfDayScreen} />
-    </Stack.Navigator>
-  );
-}
-
-// -------------------- App --------------------
-export default function App() {
-  const [hydrated, setHydrated] = useState(false);
-
-  const [workouts, setWorkouts] = useState(SEED_WORKOUTS);
-  const [dayState, setDayState] = useState({ date: todayISO(), status: "LOCKED" }); // LOCKED -> ACTIVE
-  const [dayLogs, setDayLogs] = useState([]);
-  const [endedDays, setEndedDays] = useState([]);
-
-  // Load persisted state
-  useEffect(() => {
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-
-          if (parsed?.workouts) setWorkouts(parsed.workouts);
-          if (parsed?.dayState) setDayState(parsed.dayState);
-          if (parsed?.dayLogs) setDayLogs(parsed.dayLogs);
-          if (parsed?.endedDays) setEndedDays(parsed.endedDays);
-        }
-      } catch (e) {
-        // ignore
-      } finally {
-        setHydrated(true);
-      }
-    })();
-  }, []);
-
-  // Persist on change
-  useEffect(() => {
-    if (!hydrated) return;
-    const payload = { workouts, dayState, dayLogs, endedDays };
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload)).catch(() => {});
-  }, [hydrated, workouts, dayState, dayLogs, endedDays]);
-
-  const startNewDay = () => setDayState({ date: todayISO(), status: "ACTIVE" });
-  const addLog = (entry) => setDayLogs((prev) => [...prev, entry]);
-
-  const endDay = (navigation) => {
-    const summary = scoreFromLogs(dayLogs);
-    const endedDay = { date: dayState.date, logs: dayLogs.slice(), summary };
-
-    setEndedDays((prev) => [...prev, endedDay]);
-    setDayLogs([]);
-
-    // Lock next day immediately
-    setDayState({ date: todayISO(), status: "LOCKED" });
-
-    navigation.navigate("EndOfDay", { endedDay });
-  };
-
-  const value = {
-    workouts,
-    setWorkouts,
-    dayState,
-    setDayState,
-    dayLogs,
-    setDayLogs,
-    endedDays,
-    setEndedDays,
-    startNewDay,
-    addLog,
-    endDay,
-  };
-
-  if (!hydrated) {
-    return (
-      <View style={[styles.screen, { alignItems: "center", justifyContent: "center" }]}>
-        <ActivityIndicator />
-        <Text style={[styles.subtle, { marginTop: 10 }]}>Loading…</Text>
-      </View>
-    );
-  }
-
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <AppCtx.Provider value={value}>
-        <NavigationContainer>
-          <Drawer.Navigator
-            screenOptions={{
-              headerShown: false,
-              drawerType: "front",
-              overlayColor: "rgba(0,0,0,0.45)",
-              drawerStyle: { width: 280 },
-            }}
-          >
-            <Drawer.Screen name="Home" component={HomeStack} />
-            <Drawer.Screen name="Workouts" component={WorkoutsScreen} />
-            <Drawer.Screen name="All tips" component={TipsLibraryScreen} />
-            <Drawer.Screen name="AI" component={AIScreen} />
-          </Drawer.Navigator>
-        </NavigationContainer>
-      </AppCtx.Provider>
-    </GestureHandlerRootView>
-  );
-}
-
-// -------------------- Styles --------------------
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: "#0B0F14",
-    paddingTop: 54,
-    paddingHorizontal: 16,
-  },
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 12,
-  },
-  iconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: "#121A23",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iconText: { color: "#E8EEF5", fontSize: 18, fontWeight: "700" },
-  h1: { color: "#E8EEF5", fontSize: 22, fontWeight: "800" },
-  h2: { color: "#E8EEF5", fontSize: 18, fontWeight: "800", marginBottom: 6 },
-  p: { color: "#B8C2CF", fontSize: 14, lineHeight: 20 },
-  subtle: { color: "#94A3B8", fontSize: 13, marginTop: 2 },
-  sectionTitle: {
-    color: "#E8EEF5",
-    fontSize: 14,
-    fontWeight: "800",
-    marginTop: 14,
-    marginBottom: 8,
-  },
-
-  chipsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  chip: {
-    backgroundColor: "#121A23",
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-  },
-  chipText: { color: "#C9D4E2", fontSize: 12, fontWeight: "700" },
-
-  card: {
-    backgroundColor: "#121A23",
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#1E2A3A",
-  },
-  cardDisabled: { opacity: 0.45 },
-  cardTitle: { color: "#E8EEF5", fontSize: 15, fontWeight: "800", marginBottom: 6 },
-  cardSub: { color: "#B8C2CF", fontSize: 13 },
-
-  bullet: { color: "#C9D4E2", fontSize: 13, lineHeight: 20, marginTop: 4 },
-
-  foodBar: {
-    backgroundColor: "#121A23",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#1E2A3A",
-  },
-  label: { color: "#9FB0C5", fontSize: 12, fontWeight: "800", marginTop: 10, marginBottom: 6 },
-  input: {
-    backgroundColor: "#0B0F14",
-    borderWidth: 1,
-    borderColor: "#223146",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#E8EEF5",
-    fontSize: 14,
-  },
-  row2: { flexDirection: "row", gap: 10, marginTop: 10 },
-  col: { flex: 1 },
-
-  primaryBtn: {
-    backgroundColor: "#2563EB",
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: "center",
-    marginTop: 14,
-  },
-  primaryBtnText: { color: "#E8EEF5", fontSize: 14, fontWeight: "900" },
-
-  ghostBtn: {
-    backgroundColor: "transparent",
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#223146",
-    marginTop: 14,
-  },
-  ghostBtnText: { color: "#C9D4E2", fontSize: 14, fontWeight: "900" },
-
-  banner: {
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-  },
-  bannerText: { fontSize: 14, fontWeight: "900" },
-
-  bottomBar: {
-    position: "absolute",
-    left: 16,
-    right: 16,
-    bottom: 18,
-  },
-  endDayBtn: {
-    backgroundColor: "#111827",
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "#223146",
-  },
-  endDayBtnDisabled: { opacity: 0.55 },
-  endDayBtnText: { color: "#E8EEF5", fontSize: 14, fontWeight: "900" },
-
-  scoreBox: {
-    backgroundColor: "#0E1520",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#1E2A3A",
-    marginTop: 12,
-    marginBottom: 8,
-  },
-  scoreTitle: { color: "#E8EEF5", fontSize: 15, fontWeight: "900", marginBottom: 6 },
-  scoreLine: { color: "#B8C2CF", fontSize: 13, marginTop: 2 },
-
-  prevDayCard: {
-    backgroundColor: "#0E1520",
-    borderRadius: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#1E2A3A",
-    marginBottom: 8,
-  },
-  prevDayTitle: { color: "#E8EEF5", fontSize: 14, fontWeight: "900" },
-  prevDaySub: { color: "#B8C2CF", fontSize: 12, marginTop: 4 },
-
-  lockOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(10,14,20,0.85)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 20,
-  },
-  lockCard: {
-    width: "100%",
-    maxWidth: 380,
-    backgroundColor: "#121A23",
-    borderRadius: 18,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#223146",
-  },
-
-  smallBtn: {
-    backgroundColor: "#2563EB",
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    justifyContent: "center",
-  },
-  smallBtnText: { color: "#E8EEF5", fontWeight: "900" },
-
-  deleteBtn: {
-    backgroundColor: "#2A0F14",
-    borderWidth: 1,
-    borderColor: "#4A1B24",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    alignSelf: "flex-start",
-  },
-  deleteBtnText: { color: "#F8D7DA", fontWeight: "900", fontSize: 12 },
-
-  toggleBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: "#0B0F14",
-    borderWidth: 1,
-    borderColor: "#223146",
-    alignItems: "center",
-  },
-  toggleBtnActive: {
-    backgroundColor: "#16223A",
-    borderColor: "#2B4B85",
-  },
-  toggleText: { color: "#E8EEF5", fontWeight: "900" },
-});
